@@ -1,0 +1,12 @@
+PS C:\Users\prabi\IdeaProjects\Intelligent Logistics and Delivery System> git pull origin main --allow-unrelated-histories
+remote: Enumerating objects: 8, done.
+remote: Counting objects: 100% (8/8), done.
+remote: Compressing objects: 100% (7/7), done.
+remote: Total 8 (delta 1), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (8/8), 14.01 KiB | 207.00 KiB/s, done.
+From https://github.com/Praaabin/Assessment2_CPS5002
+ * branch            main       -> FETCH_HEAD
+ * [new branch]      main       -> origin/main
+Auto-merging .gitignore
+CONFLICT (add/add): Merge conflict in .gitignore
+Automatic merge failed; fix conflicts and then commit the result.
