@@ -1,14 +1,13 @@
 package com.logistics.scheduling;
 
 import com.logistics.routing.RoutePlanner;
+import com.logistics.routing.RoutePlanner.PathResult;
 
 import java.util.List;
-import java.util.ArrayList;
-import java.util.stream.Collectors;
 
 public class Scheduler {
-    private final List<Vehicle> vehicles; // List of all available vehicles
-    private final RoutePlanner routePlanner; // Route planner for finding efficient routes
+    private final List<Vehicle> vehicles;
+    private final RoutePlanner routePlanner;
 
     public Scheduler(List<Vehicle> vehicles, RoutePlanner routePlanner) {
         this.vehicles = vehicles;
@@ -16,99 +15,89 @@ public class Scheduler {
     }
 
     /**
-     * Schedule deliveries based on priority, vehicle capacity, and deadlines.
+     * Schedules deliveries, considering vehicle capacity, location, and delivery deadlines.
      *
-     * @param deliveries List of deliveries (each delivery has source, destination, package count, and urgency).
+     * @param deliveries List of delivery requests to schedule.
      */
     public void scheduleDeliveries(List<DeliveryRequest> deliveries) {
-        // Sort deliveries by urgency (high to low priority) and deadline (earliest first)
-        deliveries.sort((d1, d2) -> {
-            int urgencyComparison = Integer.compare(d2.getUrgency(), d1.getUrgency());
-            if (urgencyComparison == 0) {
-                return Double.compare(d1.getDeadline(), d2.getDeadline());
-            }
-            return urgencyComparison;
-        });
-
         for (DeliveryRequest delivery : deliveries) {
-            Vehicle assignedVehicle = findAvailableVehicle(delivery);
+            if (delivery.isDelivered()) {
+                System.out.printf("Delivery from %s to %s is already completed.%n",
+                        delivery.getSource(), delivery.getDestination());
+                continue;
+            }
+
+            // Find an available vehicle for the delivery
+            Vehicle assignedVehicle = findAvailableVehicle(delivery.getPackageCount(), delivery.getSource());
 
             if (assignedVehicle != null) {
-                // Assign delivery to the vehicle
-                assignedVehicle.assignDelivery(delivery);
-
-                // Find the best route
-                RoutePlanner.PathResult pathResult = routePlanner.findBestPath(
-                        assignedVehicle.getCurrentLocation(),
-                        delivery.getDestination(),
-                        "shortest", // Use "shortest" as the routing preference
-                        assignedVehicle.getAvailableCapacity(),
-                        delivery.getDeadline()
-                );
-
-                // Update vehicle details
-                assignedVehicle.addDistance(pathResult.getTotalDistance());
-                assignedVehicle.setCurrentLocation(delivery.getDestination());
-
-                // Print delivery details
-                System.out.println("Delivery scheduled:");
-                System.out.println("Vehicle: " + assignedVehicle.getId());
-                System.out.println("Path: " + pathResult.getPath());
-                System.out.printf("Total Distance: %.2f km%n", pathResult.getTotalDistance());
-                System.out.printf("Total Time: %.2f mins%n", pathResult.getTotalTime());
-                System.out.printf("Average Congestion: %.2f%n", pathResult.getAverageCongestion());
-            } else {
-                System.out.println("No available vehicle for delivery to " + delivery.getDestination());
-            }
-        }
-
-        // Print summary
-        System.out.println("\n=== Delivery Summary ===");
-        for (Vehicle vehicle : vehicles) {
-            System.out.println("Vehicle " + vehicle.getId() + " Summary:");
-            System.out.println("  Total Distance Traveled: " + vehicle.getTotalDistanceTraveled() + " km");
-            System.out.println("  Deliveries: " +
-                    vehicle.getDeliveries().stream()
-                            .map(d -> d.getSource() + " -> " + d.getDestination())
-                            .collect(Collectors.joining(", ")));
-        }
-    }
-
-    /**
-     * Finds an available vehicle that can accommodate the delivery and is closest to the source.
-     *
-     * @param delivery The delivery request.
-     * @return The assigned vehicle or null if no suitable vehicle is found.
-     */
-    private Vehicle findAvailableVehicle(DeliveryRequest delivery) {
-        Vehicle bestVehicle = null;
-        double minDistance = Double.MAX_VALUE;
-
-        for (Vehicle vehicle : vehicles) {
-            if (vehicle.canAccommodate(delivery.getPackageCount())) {
-                // Calculate distance to the delivery source
-                double distanceToSource = routePlanner.calculateDistance(
-                        vehicle.getCurrentLocation(),
+                // Find the best path for the delivery
+                PathResult pathResult = routePlanner.findBestPath(
                         delivery.getSource(),
-                        vehicle.getAvailableCapacity(),
+                        delivery.getDestination(),
+                        "minimal_time", // Optimize for minimal delivery time
+                        assignedVehicle.getCapacity(),
                         delivery.getDeadline()
                 );
 
-                if (distanceToSource < minDistance) {
-                    minDistance = distanceToSource;
-                    bestVehicle = vehicle;
+                // Check if a valid path exists and the deadline is met
+                if (!pathResult.getPath().isEmpty() && pathResult.getTotalTime() <= delivery.getDeadline() * 60) {
+                    // Assign the delivery to the vehicle
+                    assignedVehicle.addDelivery(delivery);
+                    delivery.setVehicleId(assignedVehicle.getId());
+                    delivery.markAsDelivered(); // Mark delivery as completed
+
+                    // Print delivery details
+                    printDeliveryDetails(assignedVehicle, delivery, pathResult);
+                } else {
+                    System.err.printf("No valid path found or deadline exceeded for delivery from %s to %s%n",
+                            delivery.getSource(), delivery.getDestination());
                 }
+            } else {
+                System.err.printf("No available vehicle for delivery from %s to %s%n",
+                        delivery.getSource(), delivery.getDestination());
             }
         }
-        return bestVehicle;
     }
 
     /**
-     * Resets all vehicles for a new scheduling cycle.
+     * Finds an available vehicle that meets the capacity and location requirements.
+     *
+     * @param packageCount Number of packages for the delivery.
+     * @param source       Source location of the delivery.
+     * @return The available vehicle, or null if none is found.
      */
-    public void resetVehicles() {
+    private Vehicle findAvailableVehicle(int packageCount, String source) {
         for (Vehicle vehicle : vehicles) {
-            vehicle.reset();
+            // Calculate the available capacity of the vehicle
+            int availableCapacity = vehicle.getCapacity() - vehicle.getDeliveries().stream()
+                    .mapToInt(DeliveryRequest::getPackageCount)
+                    .sum();
+
+            // Check if the vehicle can accommodate the delivery and is at the source location
+            if (availableCapacity >= packageCount && vehicle.getCurrentLocation().equals(source)) {
+                return vehicle;
+            }
         }
+        return null;
+    }
+
+    /**
+     * Prints the details of a scheduled delivery.
+     *
+     * @param vehicle     The vehicle assigned to the delivery.
+     * @param delivery    The delivery request.
+     * @param pathResult  The result of the pathfinding operation.
+     */
+    private void printDeliveryDetails(Vehicle vehicle, DeliveryRequest delivery, PathResult pathResult) {
+        System.out.printf("Delivery scheduled:%n");
+        System.out.printf("Vehicle: %s%n", vehicle.getId());
+        System.out.printf("Path: %s%n", pathResult.getPath());
+        System.out.printf("Total Distance: %.2f km%n", pathResult.getTotalDistance());
+        System.out.printf("Total Time: %.2f mins%n", pathResult.getTotalTime());
+        System.out.printf("Average Congestion: %s%n", pathResult.getAverageCongestionLevel());
+        System.out.printf("Remaining Capacity: %d%n", vehicle.getAvailableCapacity());
+        System.out.printf("Delivery Status: %s%n", delivery.getStatus());
+        System.out.println("----------------------------------------");
     }
 }

@@ -1,28 +1,24 @@
 package com.logistics.scheduling;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class Vehicle {
-    private final String id;       // Unique vehicle ID
-    private final int capacity;    // Maximum number of packages the vehicle can hold
-    private int currentLoad;       // Current number of packages assigned to the vehicle
+    private final String id;
+    private final int capacity; // Maximum capacity of the vehicle
+    private int usedCapacity; // Tracks the current capacity utilization
     private String currentLocation; // Current location of the vehicle
-    private double totalDistanceTraveled; // Total distance covered by the vehicle
-    private final List<DeliveryRequest> deliveries; // Assigned deliveries
+    private final List<DeliveryRequest> deliveries; // List of assigned deliveries
 
-    public Vehicle(String id, int capacity, String initialLocation) {
-        if (capacity < 1) {
-            throw new IllegalArgumentException("Capacity must be at least 1.");
-        }
-        if (initialLocation == null || initialLocation.isEmpty()) {
-            throw new IllegalArgumentException("Initial location must be specified.");
+    public Vehicle(String id, int capacity, String currentLocation) {
+        if (capacity < 0) {
+            throw new IllegalArgumentException("Capacity must be non-negative.");
         }
         this.id = id;
         this.capacity = capacity;
-        this.currentLoad = 0;
-        this.currentLocation = initialLocation;
-        this.totalDistanceTraveled = 0;
+        this.usedCapacity = 0; // Initial capacity utilization
+        this.currentLocation = currentLocation;
         this.deliveries = new ArrayList<>();
     }
 
@@ -34,72 +30,76 @@ public class Vehicle {
         return capacity;
     }
 
-    public int getCurrentLoad() {
-        return currentLoad;
+    public int getAvailableCapacity() {
+        return capacity - usedCapacity;
     }
 
     public String getCurrentLocation() {
         return currentLocation;
     }
 
-    public double getTotalDistanceTraveled() {
-        return totalDistanceTraveled;
-    }
-
-    public List<DeliveryRequest> getDeliveries() {
-        return deliveries;
-    }
-
-    public void setCurrentLocation(String location) {
-        if (location == null || location.isEmpty()) {
-            throw new IllegalArgumentException("Location cannot be null or empty.");
-        }
-        this.currentLocation = location;
-    }
-
-    public void addDistance(double distance) {
-        if (distance < 0) {
-            throw new IllegalArgumentException("Distance cannot be negative.");
-        }
-        this.totalDistanceTraveled += distance;
-    }
-
-    public boolean canAccommodate(int packageCount) {
-        return (currentLoad + packageCount) <= capacity;
-    }
-
-    public void loadPackages(int packageCount) {
-        if (canAccommodate(packageCount)) {
-            this.currentLoad += packageCount;
-        } else {
-            throw new IllegalArgumentException("Cannot load packages. Capacity exceeded.");
-        }
-    }
-
-    public void unloadAllPackages() {
-        this.currentLoad = 0;
-        this.deliveries.clear();
-    }
-
-    public void assignDelivery(DeliveryRequest deliveryRequest) {
-        if (canAccommodate(deliveryRequest.getPackageCount())) {
-            this.deliveries.add(deliveryRequest);
-            loadPackages(deliveryRequest.getPackageCount());
-        } else {
-            throw new IllegalArgumentException("Cannot assign delivery. Capacity exceeded.");
-        }
+    /**
+     * Updates the vehicle's current location.
+     *
+     * @param newLocation The new location of the vehicle.
+     */
+    public void updateLocation(String newLocation) {
+        this.currentLocation = newLocation;
     }
 
     /**
-     * Resets the vehicle's state (e.g., for a new scheduling cycle).
+     * Returns an unmodifiable list of deliveries.
+     *
+     * @return List of assigned deliveries.
      */
-    public void reset() {
-        this.currentLoad = 0;
-        this.totalDistanceTraveled = 0;
-        this.deliveries.clear();
+    public List<DeliveryRequest> getDeliveries() {
+        return Collections.unmodifiableList(deliveries);
     }
 
-    public int getAvailableCapacity() {
-        return capacity - currentLoad;
+    /**
+     * Checks if the vehicle has enough capacity for a given package.
+     *
+     * @param packageSize The size of the package to check.
+     * @return True if the vehicle has enough available capacity, false otherwise.
+     */
+    public boolean canAccommodate(int packageSize) {
+        return getAvailableCapacity() >= packageSize;
+    }
+
+    /**
+     * Adds a delivery to the vehicle's delivery list and updates its location.
+     *
+     * @param delivery The delivery request to add.
+     * @throws IllegalStateException if the vehicle does not have enough capacity.
+     */
+    public void addDelivery(DeliveryRequest delivery) {
+        if (!canAccommodate(delivery.getPackageCount())) {
+            throw new IllegalStateException("Not enough capacity to accommodate the delivery.");
+        }
+        deliveries.add(delivery);
+        usedCapacity += delivery.getPackageCount();
+        currentLocation = delivery.getDestination(); // Update current location to delivery destination
+    }
+
+    /**
+     * Updates the vehicle's status after completing a delivery.
+     *
+     * @param delivery The completed delivery.
+     */
+    public void completeDelivery(DeliveryRequest delivery) {
+        if (deliveries.remove(delivery)) {
+            usedCapacity -= delivery.getPackageCount();
+            if (usedCapacity < 0) {
+                usedCapacity = 0; // Ensure used capacity doesn't go negative
+            }
+        }
+    }
+
+    @Override
+    public String toString() {
+        return String.format(
+                "Vehicle{id='%s', capacity=%d, usedCapacity=%d, currentLocation='%s', deliveries=%d}",
+                id, capacity, usedCapacity, currentLocation, deliveries.size()
+        );
     }
 }
