@@ -37,7 +37,7 @@ public class Graph {
     }
 
     /**
-     * Adds a bidirectional edge between two nodes.
+     * Adds a directed edge between two nodes.
      *
      * @param fromId     Source node ID.
      * @param toId       Destination node ID.
@@ -49,17 +49,29 @@ public class Graph {
         Node from = new Node(fromId);
         Node to = new Node(toId);
 
-        // Add edge from source to destination
-        adjacencyList.computeIfAbsent(from, k -> new HashMap<>())
-                .put(to, new Edge(to, distance, time, congestion));
+        if (!adjacencyList.containsKey(from) || !adjacencyList.containsKey(to)) {
+            throw new IllegalArgumentException("One or both nodes do not exist in the graph.");
+        }
 
-        // Add reverse edge from destination to source
-        adjacencyList.computeIfAbsent(to, k -> new HashMap<>())
-                .put(from, new Edge(from, distance, time, congestion));
+        adjacencyList.get(from).put(to, new Edge(to, distance, time, congestion));
     }
 
     /**
-     * Removes a bidirectional edge between two nodes.
+     * Adds a bidirectional edge between two nodes.
+     *
+     * @param fromId     Source node ID.
+     * @param toId       Destination node ID.
+     * @param distance   Distance attribute for the edge.
+     * @param time       Travel time attribute for the edge.
+     * @param congestion Congestion level attribute for the edge.
+     */
+    public void addBidirectionalEdge(String fromId, String toId, double distance, double time, double congestion) {
+        addEdge(fromId, toId, distance, time, congestion);
+        addEdge(toId, fromId, distance, time, congestion);
+    }
+
+    /**
+     * Removes a directed edge between two nodes.
      *
      * @param fromId Source node ID.
      * @param toId   Destination node ID.
@@ -68,21 +80,25 @@ public class Graph {
         Node from = new Node(fromId);
         Node to = new Node(toId);
 
-        // Remove edge from source to destination
         Map<Node, Edge> edgesFrom = adjacencyList.get(from);
         if (edgesFrom != null) {
             edgesFrom.remove(to);
         }
-
-        // Remove reverse edge from destination to source
-        Map<Node, Edge> edgesTo = adjacencyList.get(to);
-        if (edgesTo != null) {
-            edgesTo.remove(from);
-        }
     }
 
     /**
-     * Updates a bidirectional edge's attributes.
+     * Removes a bidirectional edge between two nodes.
+     *
+     * @param fromId Source node ID.
+     * @param toId   Destination node ID.
+     */
+    public void removeBidirectionalEdge(String fromId, String toId) {
+        removeEdge(fromId, toId);
+        removeEdge(toId, fromId);
+    }
+
+    /**
+     * Updates a directed edge's attributes.
      *
      * @param fromId     Source node ID.
      * @param toId       Destination node ID.
@@ -95,25 +111,31 @@ public class Graph {
         Node from = new Node(fromId);
         Node to = new Node(toId);
 
-        boolean updated = false;
-
-        // Update edge from source to destination
-        if (adjacencyList.containsKey(from) && adjacencyList.get(from).containsKey(to)) {
-            adjacencyList.get(from).put(to, new Edge(to, distance, time, congestion));
-            updated = true;
+        Map<Node, Edge> edgesFrom = adjacencyList.get(from);
+        if (edgesFrom != null && edgesFrom.containsKey(to)) {
+            edgesFrom.put(to, new Edge(to, distance, time, congestion));
+            return true;
         }
 
-        // Update reverse edge from destination to source
-        if (adjacencyList.containsKey(to) && adjacencyList.get(to).containsKey(from)) {
-            adjacencyList.get(to).put(from, new Edge(from, distance, time, congestion));
-            updated = true;
-        }
+        System.err.println("Error: Edge from " + fromId + " to " + toId + " does not exist.");
+        return false;
+    }
 
-        if (!updated) {
-            System.out.println("Edge between " + fromId + " and " + toId + " does not exist.");
-        }
+    /**
+     * Updates a bidirectional edge's attributes.
+     *
+     * @param fromId     Source node ID.
+     * @param toId       Destination node ID.
+     * @param distance   New distance.
+     * @param time       New time.
+     * @param congestion New congestion level.
+     * @return True if the edges exist and are updated; otherwise, false.
+     */
+    public boolean updateBidirectionalEdge(String fromId, String toId, double distance, double time, double congestion) {
+        boolean updatedFromTo = updateEdge(fromId, toId, distance, time, congestion);
+        boolean updatedToFrom = updateEdge(toId, fromId, distance, time, congestion);
 
-        return updated;
+        return updatedFromTo && updatedToFrom;
     }
 
     /**
@@ -136,6 +158,28 @@ public class Graph {
     }
 
     /**
+     * Returns the number of nodes in the graph.
+     *
+     * @return The number of nodes.
+     */
+    public int getNodeCount() {
+        return adjacencyList.size();
+    }
+
+    /**
+     * Returns the number of edges in the graph.
+     *
+     * @return The number of edges.
+     */
+    public int getEdgeCount() {
+        int count = 0;
+        for (Map<Node, Edge> edges : adjacencyList.values()) {
+            count += edges.size();
+        }
+        return count;
+    }
+
+    /**
      * Prints the graph structure for debugging.
      */
     public void printGraph() {
@@ -145,9 +189,28 @@ public class Graph {
             System.out.println("Node: " + node.getId());
             for (Map.Entry<Node, Edge> edgeEntry : entry.getValue().entrySet()) {
                 Edge edge = edgeEntry.getValue();
-                System.out.printf("  -> %s (Distance: %.2f, Time: %.2f, Congestion: %.2f)%n",
+                System.out.printf("  -> %s (Distance: %.2f km, Time: %.2f mins, Congestion: %.2f)%n",
                         edge.getTarget().getId(), edge.getDistance(), edge.getTime(), edge.getCongestion());
             }
         }
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== City Network ===\n");
+
+        for (Map.Entry<Node, Map<Node, Edge>> entry : adjacencyList.entrySet()) {
+            Node node = entry.getKey();
+            sb.append("Node: ").append(node.getId()).append("\n");
+
+            for (Map.Entry<Node, Edge> edgeEntry : entry.getValue().entrySet()) {
+                Edge edge = edgeEntry.getValue();
+                sb.append(String.format("  -> %-5s (Distance: %-5.2f km, Time: %-5.2f mins, Congestion: %-4.2f)\n",
+                        edge.getTarget().getId(), edge.getDistance(), edge.getTime(), edge.getCongestion()));
+            }
+        }
+
+        return sb.toString();
     }
 }
