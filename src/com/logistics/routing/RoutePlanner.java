@@ -1,9 +1,10 @@
 package com.logistics.routing;
 
 import com.logistics.graph.Graph;
+import com.logistics.scheduling.Vehicle;
+import com.logistics.scheduling.DeliveryRequest;
 
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 public class RoutePlanner {
     private final Graph graph;
@@ -15,11 +16,11 @@ public class RoutePlanner {
     /**
      * Finds the best path based on user preference.
      *
-     * @param sourceId       Starting node ID.
-     * @param targetId       Destination node ID.
-     * @param preference     User preference (e.g., "shortest" or "minimal_time").
+     * @param sourceId        Starting node ID.
+     * @param targetId        Destination node ID.
+     * @param preference      User preference (e.g., "shortest" or "minimal_time").
      * @param vehicleCapacity Vehicle capacity constraint.
-     * @param deadline       Delivery deadline.
+     * @param deadline        Delivery deadline.
      * @return The best path result including path, distance, time, and congestion.
      */
     public PathResult findBestPath(String sourceId, String targetId, String preference, int vehicleCapacity, double deadline) {
@@ -27,22 +28,19 @@ public class RoutePlanner {
 
         try {
             switch (preference.toLowerCase()) {
-                case "shortest":
-                    pathResult = new DijkstraAlgorithm(graph).findShortestPathWithDetails(sourceId, targetId, vehicleCapacity, deadline);
-                    break;
-                case "minimal_time":
-                    pathResult = new AStarAlgorithm(graph).findMinimalTimePathWithDetails(sourceId, targetId, vehicleCapacity, deadline);
-                    break;
-                default:
-                    throw new IllegalArgumentException("Invalid preference. Use 'shortest' or 'minimal_time'.");
+                case "shortest" -> pathResult = new DijkstraAlgorithm(graph).findShortestPathWithDetails(
+                        sourceId, targetId, vehicleCapacity, deadline, false);
+                case "minimal_time" -> pathResult = new AStarAlgorithm(graph).findMinimalTimePathWithDetails(
+                        sourceId, targetId, vehicleCapacity, deadline);
+                default -> throw new IllegalArgumentException("Invalid preference. Use 'shortest' or 'minimal_time'.");
             }
         } catch (Exception e) {
-            System.err.println("Error finding path: " + e.getMessage());
+            System.err.printf("Error finding path: %s%n", e.getMessage());
         }
 
         // Fallback if no valid path is found
         if (pathResult == null || pathResult.getPath().isEmpty()) {
-            System.err.println("Error: No valid path found between " + sourceId + " and " + targetId);
+            System.err.printf("Error: No valid path found between %s and %s%n", sourceId, targetId);
             return new PathResult(Collections.emptyList(), Double.MAX_VALUE, Double.MAX_VALUE, 0.0);
         }
 
@@ -50,22 +48,31 @@ public class RoutePlanner {
     }
 
     /**
-     * Calculates the shortest distance between two nodes using Dijkstra's Algorithm.
+     * Assigns deliveries to vehicles based on constraints like capacity and deadlines.
      *
-     * @param sourceId       The starting node.
-     * @param targetId       The destination node.
-     * @param vehicleCapacity Vehicle capacity constraint.
-     * @param deadline       Delivery deadline.
-     * @return The total distance between source and target, or Double.MAX_VALUE if no valid path exists.
+     * @param vehicles         List of available vehicles.
+     * @param deliveryRequests List of delivery requests.
      */
-    public double calculateDistance(String sourceId, String targetId, int vehicleCapacity, double deadline) {
-        PathResult pathResult = findBestPath(sourceId, targetId, "shortest", vehicleCapacity, deadline);
+    public void assignDeliveries(List<Vehicle> vehicles, List<DeliveryRequest> deliveryRequests) {
+        for (DeliveryRequest request : deliveryRequests) {
+            for (Vehicle vehicle : vehicles) {
+                if (vehicle.canAccommodate(request.getPackageCount())) {
+                    PathResult pathResult = findBestPath(
+                            vehicle.getCurrentLocation(),
+                            request.getDestination(),
+                            "minimal_time",
+                            vehicle.getCapacity(),
+                            request.getDeadline()
+                    );
 
-        if (pathResult.getPath().isEmpty()) {
-            return Double.MAX_VALUE; // Indicates no valid path
+                    if (!pathResult.getPath().isEmpty() && pathResult.getTotalTime() <= request.getDeadline()) {
+                        vehicle.addDelivery(request);
+                        request.setVehicleId(vehicle.getId());
+                        break;
+                    }
+                }
+            }
         }
-
-        return pathResult.getTotalDistance();
     }
 
     /**
@@ -100,14 +107,29 @@ public class RoutePlanner {
             return averageCongestion;
         }
 
+        /**
+         * Converts the numeric average congestion value into a descriptive level.
+         *
+         * @return Congestion level as a String ("Light", "Moderate", "Heavy").
+         */
+        public String getAverageCongestionLevel() {
+            if (averageCongestion < 0.3) {
+                return "Light";
+            } else if (averageCongestion < 0.7) {
+                return "Moderate";
+            } else {
+                return "Heavy";
+            }
+        }
+
         @Override
         public String toString() {
             if (path == null || path.isEmpty()) {
                 return "No valid route found.";
             }
             return String.format(
-                    "Optimal Route: %s%nTotal Distance: %.2f km%nTotal Time: %.2f mins%nAverage Congestion: %.2f",
-                    path, totalDistance, totalTime, averageCongestion
+                    "Optimal Route: %s%nTotal Distance: %.2f km%nTotal Time: %.2f mins%nAverage Congestion: %s",
+                    path, totalDistance, totalTime, getAverageCongestionLevel()
             );
         }
     }

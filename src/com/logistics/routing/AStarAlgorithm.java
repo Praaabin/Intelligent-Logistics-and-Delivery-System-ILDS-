@@ -1,8 +1,8 @@
 package com.logistics.routing;
 
-import com.logistics.graph.Edge;
 import com.logistics.graph.Graph;
 import com.logistics.graph.Node;
+import com.logistics.graph.Edge;
 
 import java.util.*;
 
@@ -14,74 +14,75 @@ public class AStarAlgorithm {
     }
 
     /**
-     * Finds the minimal time path with constraints using the A* algorithm.
+     * Finds the minimal time path from source to target using A* algorithm.
      *
-     * @param sourceId        The starting node ID.
-     * @param targetId        The destination node ID.
-     * @param vehicleCapacity The capacity of the vehicle (constraint).
-     * @param deadline        The deadline for the delivery in hours.
-     * @return The optimal path as a RoutePlanner.PathResult object.
+     * @param sourceId        Source node ID.
+     * @param targetId        Target node ID.
+     * @param vehicleCapacity Vehicle capacity constraint.
+     * @param deadline        Delivery deadline.
+     * @return PathResult containing the minimal time path, total distance, total time, and average congestion.
      */
     public RoutePlanner.PathResult findMinimalTimePathWithDetails(String sourceId, String targetId, int vehicleCapacity, double deadline) {
         Node source = new Node(sourceId);
         Node target = new Node(targetId);
 
-        if (!graph.hasNode(source.getId()) || !graph.hasNode(target.getId())) {
-            throw new IllegalArgumentException("One or both nodes do not exist in the graph.");
+        if (!graph.getAdjacencyList().containsKey(source) || !graph.getAdjacencyList().containsKey(target)) {
+            throw new IllegalArgumentException("Source or target node does not exist in the graph.");
         }
 
-        // Initialize data structures
-        PriorityQueue<NodeDistance> pq = new PriorityQueue<>(Comparator.comparingDouble(NodeDistance::getPriority));
+        // Priority queue to select the node with the smallest estimated total time
+        PriorityQueue<NodeTime> pq = new PriorityQueue<>(Comparator.comparingDouble(NodeTime::getEstimatedTotalTime));
+
+        // Map to store the shortest time to each node
         Map<Node, Double> times = new HashMap<>();
-        Map<Node, Double> distances = new HashMap<>();
+
+        // Map to store the predecessor of each node in the shortest path
         Map<Node, Node> previous = new HashMap<>();
+
+        // Set to track visited nodes
         Set<Node> visited = new HashSet<>();
 
+        // Initialize times: set source time to 0 and all others to infinity
         times.put(source, 0.0);
-        distances.put(source, 0.0);
-        pq.add(new NodeDistance(source, heuristic(source, target)));
+        pq.add(new NodeTime(source, 0.0, heuristic(source, target)));
 
-        double deadlineInMinutes = deadline * 60; // Convert hours to minutes
-
-        // Process the priority queue
         while (!pq.isEmpty()) {
-            NodeDistance current = pq.poll();
+            NodeTime current = pq.poll();
             Node currentNode = current.getNode();
 
+            // If we reach the target node, stop the algorithm
+            if (currentNode.equals(target)) {
+                break;
+            }
+
             // Skip already visited nodes
-            if (visited.contains(currentNode)) continue;
+            if (visited.contains(currentNode)) {
+                continue;
+            }
             visited.add(currentNode);
 
-            // Stop if the target is reached
-            if (currentNode.equals(target)) break;
-
-            // Explore neighbors
+            // Traverse all neighbors of the current node
             for (Map.Entry<Node, Edge> neighborEntry : graph.getNeighbors(currentNode).entrySet()) {
                 Node neighbor = neighborEntry.getKey();
                 Edge edge = neighborEntry.getValue();
 
+                // Calculate the new time to the neighbor
                 double newTime = times.getOrDefault(currentNode, Double.MAX_VALUE) + edge.getTime();
-                double newDistance = distances.getOrDefault(currentNode, Double.MAX_VALUE) + edge.getDistance();
 
-                // Validate constraints: deadline and vehicle capacity
-                if (newTime > deadlineInMinutes || edge.getCongestion() > vehicleCapacity) continue;
-
-                // Update if a better path is found
+                // If a shorter path is found, update the time and predecessor
                 if (newTime < times.getOrDefault(neighbor, Double.MAX_VALUE)) {
                     times.put(neighbor, newTime);
-                    distances.put(neighbor, newDistance);
                     previous.put(neighbor, currentNode);
-                    pq.add(new NodeDistance(neighbor, newTime + heuristic(neighbor, target)));
+                    pq.add(new NodeTime(neighbor, newTime, heuristic(neighbor, target)));
                 }
             }
         }
 
-        // Reconstruct the path
+        // Reconstruct the minimal time path
         List<String> path = reconstructPath(previous, source, target);
-        if (path.isEmpty()) {
-            System.err.printf("Error: No valid path found between %s and %s%n", sourceId, targetId);
-        }
-        double totalDistance = distances.getOrDefault(target, Double.MAX_VALUE);
+
+        // Calculate total distance, time, and average congestion
+        double totalDistance = calculateTotalDistance(path);
         double totalTime = times.getOrDefault(target, Double.MAX_VALUE);
         double averageCongestion = calculateAverageCongestion(path);
 
@@ -89,29 +90,12 @@ public class AStarAlgorithm {
     }
 
     /**
-     * Heuristic function for A* algorithm.
+     * Reconstructs the path from the target node to the source node.
      *
-     * @param current The current node.
-     * @param target  The target node.
-     * @return Estimated time to reach the target from the current node.
-     */
-    private double heuristic(Node current, Node target) {
-        // Heuristic uses the straight-line distance approximation (or any admissible heuristic).
-        double averageSpeed = 60.0; // Assumed average speed in km/h
-        return graph.getNeighbors(current).values()
-                .stream()
-                .mapToDouble(Edge::getDistance)
-                .min()
-                .orElse(0.0) / averageSpeed; // Estimated time in hours
-    }
-
-    /**
-     * Reconstructs the path using the 'previous' map.
-     *
-     * @param previous The map of nodes to their predecessors.
-     * @param source   The source node.
-     * @param target   The target node.
-     * @return The reconstructed path as a list of node IDs.
+     * @param previous Map of nodes to their predecessors.
+     * @param source   Source node.
+     * @param target   Target node.
+     * @return A list of node IDs representing the path.
      */
     private List<String> reconstructPath(Map<Node, Node> previous, Node source, Node target) {
         List<String> path = new ArrayList<>();
@@ -120,52 +104,81 @@ public class AStarAlgorithm {
         }
         Collections.reverse(path);
 
-        // Return empty if the path doesn't start from the source
-        return path.isEmpty() || !path.get(0).equals(source.getId()) ? Collections.emptyList() : path;
+        if (!path.isEmpty() && path.get(0).equals(source.getId())) {
+            return path;
+        } else {
+            return Collections.emptyList(); // No valid path
+        }
     }
 
     /**
-     * Calculates the average congestion for a given path.
+     * Calculates the total distance of the path.
      *
      * @param path The path as a list of node IDs.
-     * @return The average congestion across the path.
+     * @return The total distance in kilometers.
      */
-    private double calculateAverageCongestion(List<String> path) {
-        double totalCongestion = 0;
-        int edgeCount = 0;
-
+    private double calculateTotalDistance(List<String> path) {
+        double totalDistance = 0.0;
         for (int i = 0; i < path.size() - 1; i++) {
             Node from = new Node(path.get(i));
             Node to = new Node(path.get(i + 1));
             Edge edge = graph.getNeighbors(from).get(to);
-
-            if (edge != null) {
-                totalCongestion += edge.getCongestion();
-                edgeCount++;
-            }
+            totalDistance += edge.getDistance();
         }
-
-        return edgeCount > 0 ? totalCongestion / edgeCount : 0.0;
+        return totalDistance;
     }
 
     /**
-     * Helper class to store node distances and priorities for the priority queue.
+     * Calculates the average congestion level along the path.
+     *
+     * @param path The path as a list of node IDs.
+     * @return The average congestion level (0 to 1).
      */
-    private static class NodeDistance {
-        private final Node node;
-        private final double priority;
+    private double calculateAverageCongestion(List<String> path) {
+        double totalCongestion = 0.0;
+        int edgeCount = 0;
+        for (int i = 0; i < path.size() - 1; i++) {
+            Node from = new Node(path.get(i));
+            Node to = new Node(path.get(i + 1));
+            Edge edge = graph.getNeighbors(from).get(to);
+            totalCongestion += edge.getCongestion();
+            edgeCount++;
+        }
+        return edgeCount == 0 ? 0.0 : totalCongestion / edgeCount;
+    }
 
-        public NodeDistance(Node node, double priority) {
+    /**
+     * Heuristic function for A* algorithm (Euclidean distance).
+     *
+     * @param node   Current node.
+     * @param target Target node.
+     * @return Estimated time from the current node to the target node.
+     */
+    private double heuristic(Node node, Node target) {
+        // Placeholder: Replace with actual heuristic calculation (e.g., Euclidean distance)
+        return 0.0;
+    }
+
+    /**
+     * Helper class to store a node, its time, and its estimated total time.
+     */
+    private static class NodeTime {
+        private final Node node;
+        private final double time;
+        private final double estimatedTotalTime;
+
+        public NodeTime(Node node, double time, double heuristic) {
             this.node = node;
-            this.priority = priority;
+            this.time = time;
+            this.estimatedTotalTime = time + heuristic;
         }
 
         public Node getNode() {
             return node;
         }
 
-        public double getPriority() {
-            return priority;
+        public double getEstimatedTotalTime() {
+            return estimatedTotalTime;
         }
     }
 }
